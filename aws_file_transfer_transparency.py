@@ -3,6 +3,7 @@ import argparse
 from PIL import Image
 import logging
 import sys
+from io import BytesIO
 
 
 def initialize_logger():
@@ -39,7 +40,7 @@ def initialize_logger():
 logger = initialize_logger()
 
 
-def main(argv):
+def main():
     """
     Provides a convenient way to accept some information at the command line while running the program.
 
@@ -49,24 +50,29 @@ def main(argv):
     # Create parse
     argParser = argparse.ArgumentParser()
 
-    argParser.add_argument("aws-src-bucket", type=str, help="Source bucket")
-    argParser.add_argument("aws-dest-bucket", type=str, help="Source bucket")
-    argParser.add_argument("aws-key-id", type=str, help="Source bucket")
-    argParser.add_argument("aws-secret-key", type=str, help="Source bucket")
-
-    argParser.add_argument("-s", "--save-to-directory",
-                           help="Directory that the detected images will be saved")
+    argParser.add_argument("-aki", "--aws_access_key_id", type=str,
+                           help="AWS Access Key ID")
+    argParser.add_argument("-sak", "--aws_secret_access_key",
+                           type=str, help="AWS Secret Access Key")
+    argParser.add_argument("-st", "--aws_session_token", type=str,
+                           help="AWS Session Token")
+    argParser.add_argument("-sbn", "--src-bucket_name", type=str,
+                           help="Source Bucket Name")
+    argParser.add_argument("-dbn", "--dst-bucket-name", type=str,
+                           help="Destination Bucket Name")
 
     args = argParser.parse_args()
 
     # return dictionary that contains command line inputs
-    return {'aws-src-bucket': args.aws_src_bucket,
-            'aws-dest-bucket': args.aws_dest_bucket,
-            'aws-key-id': args.aws_key_id,
-            'aws-secret-key': args.aws_secret_key}
+    return {'aws-access-key-id': args.aws_access_key_id,
+            'aws-secret-access-key': args.aws_secret_access_key,
+            'aws-session-token': args.aws_session_token,
+            'src-bucket-name': args.src_bucket_name,
+            'dst-bucket-name': args.dst_bucket_name
+            }
 
 
-def create_session(aws_access_key_id, aws_secret_access_key):
+def create_session(aws_access_key_id, aws_secret_access_key, aws_session_token):
     """
     Create AWS session by using access key and secret key
 
@@ -79,8 +85,8 @@ def create_session(aws_access_key_id, aws_secret_access_key):
     """
     # create session
     session = boto3.Session(aws_access_key_id=aws_access_key_id,
-                            aws_secret_access_key=aws_secret_access_key)
-    logger.info('Session was created')
+                            aws_secret_access_key=aws_secret_access_key,
+                            aws_session_token=aws_session_token)
 
     return session
 
@@ -105,6 +111,8 @@ def copy_s3(session, source_bucket_name, source_bucket_key, dest_bucket_name, de
     bucket = s3.Bucket(dest_bucket_name)
     bucket.copy(copy_source, dest_bucket_key)
 
+    logger.info('Object copied.')
+
 
 def get_all_object_from_s3_bucket(session, bucket_name):
     """
@@ -118,21 +126,31 @@ def get_all_object_from_s3_bucket(session, bucket_name):
         _type_: _description_
     """
     s3 = session.resource('s3')
+    # get the bucket
     bucket = s3.Bucket(bucket_name)
-    return [item.key for item in bucket.objects]
+    objects = []
+    # fetch the all objects under the bucket and convert the bytestring
+    for obj in bucket.objects.all():
+        key = obj.key
+        file_byte_string = obj.get()['Body'].read()
+        objects.append({'key': key, 'file_byte_string': file_byte_string})
+
+    return objects
 
 
-def has_transparency(file):
+def has_transparency(file_byte_string):
     """
+    Takes Byte string as an input parameter to convert and check the transparency
 
     Args:
-        file (str): File path
+        file_byte_string (str): File byte String
 
     Returns:
         boolean: Returns True if the images has transparency, otherwise returns False
     """
     # load image
-    img = Image.open(file).convert('RGBA')
+
+    img = Image.open(BytesIO(file_byte_string)).convert('RGBA')
 
     if img.info.get("transparency", None) is not None:
         return True
@@ -151,23 +169,34 @@ def has_transparency(file):
 
 # Execute code when the file runs as a script
 if __name__ == "__main__":
-    aws_access_key_id = 'test'
-    aws_secret_access_key = 'test1'
-    bucket_name = 'bucket'
-    dest_bucket_key = 'dest_bucket_key'
-    dest_bucket_name = 'dest_bucket_name'
+    input_dict = main()
+    logger.info('Script started')
+
+    aws_access_key_id = input_dict['aws-access-key-id']
+    aws_secret_access_key = input_dict['aws-secret-access-key']
+    aws_session_token = input_dict['aws-session-token']
+    src_bucket_name = input_dict['src-bucket-name']
+    dst_bucket_name = input_dict['dst-bucket-name']
 
     # create session
-    session = create_session(aws_access_key_id, aws_secret_access_key)
+    session = create_session(
+        aws_access_key_id, aws_secret_access_key, aws_session_token)
+
     # get all objects from the bucket
-    files = get_all_object_from_s3_bucket(
-        session=session, bucket_name=bucket_name)
+    files_dict_list = get_all_object_from_s3_bucket(
+        session=session, bucket_name=src_bucket_name)
+
     # check the image has transparency
-    for f in files:
-        if has_transparency is True:
+    for f_dict in files_dict_list:
+        if has_transparency(f_dict['file_byte_string']) is True:
             # log the file name if it has transparency
-            logger.info(f'{f} has transparent pixels')
+            logger.info(f"{f_dict['key']} has transparent pixels")
         else:
             # copy the file to destination bucket if the image has not transparency
-            copy_s3(session=session, source_bucket_name=bucket_name, source_bucket_key=f,
-                    dest_bucket_key=f, dest_bucket_name=dest_bucket_name)
+            copy_s3(session=session,
+                    source_bucket_name=src_bucket_name,
+                    source_bucket_key=f_dict['key'],
+                    dest_bucket_key=f_dict['key'],
+                    dest_bucket_name=dst_bucket_name)
+
+    logger.info('Script completed')

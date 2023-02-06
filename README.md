@@ -46,3 +46,25 @@ Guidelines:
 - Your script should handle any errors that may occur during the opening of image file, copy process and anywhere else you deem necessary
 - Your script should be well commented and easy to understand
 - Your script should be executed from the command line
+
+## Required Packages:
+pip install Pillow <br/>
+pip install boto3 <br/>
+
+
+## install AWS CLI and get token, access key id and session token
+aws sts get-session-token --duration-seconds 900 --serial-number < MFA Device ID >  --token-code < MFA code >
+
+## How to run script:
+python3 aws_file_transfer_transparency.py -h <br/>
+python3 aws_file_transfer_transparency.py \ <br/>
+  -aki <access_key_id>\ <br/>
+  -sak <security_access_key>\ <br/>
+  -st <session_token>\ <br/>
+  -sbn <src_bucket_name>\ <br/>
+  -dbn <dst_bucket_name> <br/>
+
+## Reference links
+https://stackoverflow.com/questions/65615059/check-if-an-image-is-transparent-or-not
+https://dev.to/aws-builders/how-to-list-contents-of-s3-bucket-using-boto3-python-47mm
+https://stackoverflow.com/questions/47468148/how-to-copy-s3-object-from-one-bucket-to-another-using-python-boto3
